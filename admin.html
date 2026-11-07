@@ -283,7 +283,7 @@
         .status-active { background: #D1FAE5; color: #059669; }
         .status-inactive { background: #FEE2E2; color: #DC2626; }
 
-        /* Firebase Email/Password Login Screen */
+        /* PIN Login Screen */
         .pin-screen {
             position: fixed;
             inset: 0;
@@ -332,7 +332,7 @@
             text-align: center;
             font-size: 1.5rem;
             font-weight: 800;
-            letter-spacing: 1px;
+            letter-spacing: 8px;
             outline: none;
             margin-bottom: 16px;
             color: var(--secondary);
@@ -409,18 +409,17 @@
 </head>
 <body>
 
-    <!-- ================= FIREBASE EMAIL/PASSWORD LOGIN SCREEN ================= -->
+    <!-- ================= PIN LOGIN SCREEN ================= -->
     <div id="pin-screen" class="pin-screen">
         <div class="pin-box">
             <img src="https://i.postimg.cc/4308Kqh7/file-0000000085f881f582c588c132aa44a0.png" alt="Logo">
-            <h2>Admin Login</h2>
-            <p>Sign in with your authorized Firebase account</p>
-
-            <input type="email" id="admin-email-input" class="pin-input" placeholder="Admin Email" autocomplete="username" style="font-size:1rem;letter-spacing:0;text-align:left;font-weight:500">
-            <input type="password" id="admin-password-input" class="pin-input" placeholder="Password" autocomplete="current-password" style="font-size:1rem;letter-spacing:0;text-align:left;font-weight:500">
-            <p id="pin-error-msg" class="pin-error" role="alert"></p>
-
-            <button id="admin-login-button" class="btn-primary w-full" onclick="verifyAdminLogin()">Login to Admin Panel</button>
+            <h2>Admin Access</h2>
+            <p>Enter your secret PIN to continue</p>
+            
+            <input type="password" id="admin-pin-input" class="pin-input" placeholder="****" maxlength="10" autocomplete="off">
+            <p id="pin-error-msg" class="pin-error">❌ Wrong PIN! Please try again.</p>
+            
+            <button class="btn-primary w-full" onclick="verifyAdminPin()">Unlock Panel</button>
         </div>
         <p class="text-xs text-white/50 mt-6">Only authorized personnel can access this panel.</p>
     </div>
@@ -607,8 +606,6 @@
                 <div id="categories-list">
                     <p class="text-xs text-gray-400 text-center py-4">Loading...</p>
                 </div>
-                <button class="btn-primary w-full mt-3" onclick="addDefaultCategories()"><i class="fas fa-layer-group"></i> Add 8 Free Fire Categories</button>
-                <p class="text-xs text-gray-500 mt-2">এই বাটনে চাপলে নিচের ৮টি ক্যাটাগরি Firebase-এ যোগ হবে। আগে থেকে থাকা ক্যাটাগরি ডুপ্লিকেট হবে না।</p>
                 <button class="btn-outline w-full mt-3" onclick="openAddCategoryModal()"><i class="fas fa-plus"></i> Add Category</button>
             </div>
 
@@ -941,119 +938,48 @@
         // 2. IMPORTS
         // ==========================================
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // ==========================================
         // 3. INITIALIZATION
         // ==========================================
         const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // Default Free Fire product categories. These are also shown in the Product dropdown.
-        const DEFAULT_PRODUCT_CATEGORIES = [
-            { id: 'default_diamond_top_up', name: 'Diamond Top Up', imageUrl: 'https://placehold.co/300x300/png?text=Diamond+Top+Up' },
-            { id: 'default_weekly_monthly', name: 'Weekly / Monthly', imageUrl: 'https://placehold.co/300x300/png?text=Weekly+Monthly' },
-            { id: 'default_weekly_lite', name: 'Weekly Lite', imageUrl: 'https://placehold.co/300x300/png?text=Weekly+Lite' },
-            { id: 'default_level_up_pass', name: 'Level Up Pass', imageUrl: 'https://placehold.co/300x300/png?text=Level+Up+Pass' },
-            { id: 'default_evo_access', name: 'EVO Access', imageUrl: 'https://placehold.co/300x300/png?text=EVO+Access' },
-            { id: 'default_special_airdrop', name: 'Special Airdrop', imageUrl: 'https://placehold.co/300x300/png?text=Special+Airdrop' },
-            { id: 'default_unipin_voucher', name: 'UniPin Voucher', imageUrl: 'https://placehold.co/300x300/png?text=UniPin+Voucher' },
-            { id: 'default_indonesia_top_up', name: 'Indonesia Top Up', imageUrl: 'https://placehold.co/300x300/png?text=Indonesia+Top+Up' }
-        ];
-
         // ==========================================
-        // 4. FIREBASE EMAIL/PASSWORD ADMIN AUTH
+        // 4. ADMIN PIN LOGIC
         // ==========================================
-        const loginScreen = document.getElementById('pin-screen');
-        const adminPanel = document.getElementById('admin-main-panel');
-        const loginError = document.getElementById('pin-error-msg');
-        const loginButton = document.getElementById('admin-login-button');
-
-        function showAdminLoginError(message) {
-            loginError.textContent = message;
-            loginError.style.display = 'block';
+        const ADMIN_PIN = "NBH"; // Fixed PIN as requested
+        
+        // Check if admin is already logged in (session storage)
+        if (sessionStorage.getItem('isAdminLoggedIn') === 'true') {
+            document.getElementById('pin-screen').style.display = 'none';
+            document.getElementById('admin-main-panel').style.display = 'block';
+            loadAllData();
         }
 
-        function firebaseAuthErrorMessage(error) {
-            const code = error && error.code ? error.code : '';
-            if (code === 'auth/invalid-email') return 'ইমেইল ঠিকানা সঠিক নয়।';
-            if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') return 'ইমেইল অথবা পাসওয়ার্ড ভুল।';
-            if (code === 'auth/too-many-requests') return 'অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।';
-            if (code === 'auth/network-request-failed') return 'ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।';
-            if (code === 'auth/operation-not-allowed') return 'Firebase Console থেকে Email/Password sign-in চালু করুন।';
-            if (code === 'auth/unauthorized-domain') return 'এই ওয়েবসাইটের ডোমেইন Firebase Authentication-এর Authorized domains-এ যোগ করুন।';
-            if (code === 'auth/user-disabled') return 'এই Admin account Firebase থেকে Disable করা আছে।';
-            if (code === 'auth/client-timeout') return error.message;
-            return 'Firebase Error: ' + (code || 'unknown') + (error && error.message ? ' — ' + error.message : '');
-        }
-
-        async function verifyAdminLogin() {
-            const email = document.getElementById('admin-email-input').value.trim();
-            const password = document.getElementById('admin-password-input').value;
-            loginError.style.display = 'none';
-            if (!email || !password) {
-                showAdminLoginError('ইমেইল ও পাসওয়ার্ড দুটোই লিখুন।');
-                return;
-            }
-            loginButton.disabled = true;
-            loginButton.textContent = 'Signing in...';
-
-            let timeoutId;
-            try {
-                // Firebase normally responds quickly. Avoid leaving the button stuck forever
-                // if the browser/network cannot complete the Authentication request.
-                const signInPromise = signInWithEmailAndPassword(auth, email, password);
-                const timeoutPromise = new Promise((resolve, reject) => {
-                    timeoutId = setTimeout(() => {
-                        const timeoutError = new Error(
-                            'Firebase Authentication ২০ সেকেন্ডেও response দেয়নি। Internet, Render domain এবং Firebase Authorized domains পরীক্ষা করুন।'
-                        );
-                        timeoutError.code = 'auth/client-timeout';
-                        reject(timeoutError);
-                    }, 20000);
-                });
-
-                await Promise.race([signInPromise, timeoutPromise]);
-                // onAuthStateChanged handles showing the panel after Firebase confirms the session.
-            } catch (error) {
-                showAdminLoginError(firebaseAuthErrorMessage(error));
-                if (error && error.code !== 'auth/client-timeout') {
-                    document.getElementById('admin-password-input').value = '';
-                }
-            } finally {
-                if (timeoutId) clearTimeout(timeoutId);
-                loginButton.disabled = false;
-                loginButton.textContent = 'Login to Admin Panel';
-            }
-        }
-
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                loginScreen.style.display = 'none';
-                adminPanel.style.display = 'block';
-                if (!window.__aminxAdminDataLoaded) {
-                    window.__aminxAdminDataLoaded = true;
-                    loadAllData();
-                }
+        function verifyAdminPin() {
+            const enteredPin = document.getElementById('admin-pin-input').value;
+            const errorMsg = document.getElementById('pin-error-msg');
+            
+            if (enteredPin === ADMIN_PIN) {
+                sessionStorage.setItem('isAdminLoggedIn', 'true');
+                document.getElementById('pin-screen').style.display = 'none';
+                document.getElementById('admin-main-panel').style.display = 'block';
+                loadAllData();
             } else {
-                window.__aminxAdminDataLoaded = false;
-                adminPanel.style.display = 'none';
-                loginScreen.style.display = 'flex';
-            }
-        });
-
-        async function logoutAdmin() {
-            try {
-                await signOut(auth);
-            } catch (error) {
-                console.error('Admin logout failed:', error);
-                showAdminLoginError('Logout করা যায়নি। আবার চেষ্টা করুন।');
+                errorMsg.style.display = 'block';
+                document.getElementById('admin-pin-input').value = '';
+                setTimeout(() => { errorMsg.style.display = 'none'; }, 3000);
             }
         }
 
-        // Load all data after successful Firebase authentication
+        function logoutAdmin() {
+            sessionStorage.removeItem('isAdminLoggedIn');
+            window.location.reload();
+        }
+
+        // Load all data after successful PIN entry
         function loadAllData() {
             loadDashboardData();
             loadProducts();
@@ -1070,12 +996,9 @@
             loadSpinSettings();
         }
 
-        // Allow Enter key to submit Firebase email/password login
-        document.getElementById('admin-email-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') verifyAdminLogin();
-        });
-        document.getElementById('admin-password-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') verifyAdminLogin();
+        // Allow Enter key to submit PIN
+        document.getElementById('admin-pin-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') verifyAdminPin();
         });
 
         // ==========================================
@@ -1254,7 +1177,7 @@
             }
         }
 
-        async function openAddProductModal() {
+        function openAddProductModal() {
             document.getElementById('modal-title').textContent = 'Add Product';
             document.getElementById('edit-product-id').value = '';
             document.getElementById('prod-name').value = '';
@@ -1265,49 +1188,25 @@
             document.getElementById('prod-diamond-count').value = '';
             document.getElementById('prod-requires-whatsapp').value = 'false';
             document.getElementById('prod-status').value = 'true';
-
-            // Wait until Firestore categories are loaded before opening the form.
-            await loadCategoriesToDropdown();
+            
+            // Load categories into dropdown
+            loadCategoriesToDropdown();
+            
             document.getElementById('product-modal').classList.add('active');
         }
 
         async function loadCategoriesToDropdown() {
-            const select = document.getElementById('prod-category');
-            select.disabled = true;
-            select.innerHTML = '<option value="">Loading categories...</option>';
-
             try {
                 const q = query(collection(db, "categories"));
                 const querySnapshot = await getDocs(q);
-                const categories = new Set(DEFAULT_PRODUCT_CATEGORIES.map((cat) => cat.name));
-
-                querySnapshot.forEach((categoryDoc) => {
-                    const cat = categoryDoc.data();
-                    if (cat && typeof cat.name === 'string' && cat.name.trim()) {
-                        categories.add(cat.name.trim());
-                    }
-                });
-
-                // Show the built-in Free Fire categories as well as every category saved in Firebase.
-                const sortedCategories = Array.from(categories).sort((a, b) => a.localeCompare(b));
+                const select = document.getElementById('prod-category');
                 select.innerHTML = '<option value="">Select Category</option>';
-
-                if (sortedCategories.length === 0) {
-                    select.innerHTML = '<option value="">No categories found - add a category first</option>';
-                    return;
-                }
-
-                sortedCategories.forEach((name) => {
-                    const option = document.createElement('option');
-                    option.value = name;
-                    option.textContent = name;
-                    select.appendChild(option);
+                querySnapshot.forEach((doc) => {
+                    const cat = doc.data();
+                    select.innerHTML += `<option value="${cat.name}">${cat.name}</option>`;
                 });
             } catch (error) {
                 console.error("Error loading categories: ", error);
-                select.innerHTML = '<option value="">Could not load categories - check connection/permissions</option>';
-            } finally {
-                select.disabled = false;
             }
         }
 
@@ -1677,54 +1576,6 @@
                 container.innerHTML = html;
             } catch (error) {
                 console.error("Error loading categories: ", error);
-            }
-        }
-
-        async function addDefaultCategories() {
-            const button = document.querySelector('button[onclick="addDefaultCategories()"]');
-            if (button) {
-                button.disabled = true;
-                button.textContent = 'Adding categories...';
-            }
-
-            try {
-                const snapshot = await getDocs(query(collection(db, "categories")));
-                const existingNames = new Set();
-                snapshot.forEach((categoryDoc) => {
-                    const data = categoryDoc.data();
-                    if (data && typeof data.name === 'string') {
-                        existingNames.add(data.name.trim().toLowerCase());
-                    }
-                });
-
-                let added = 0;
-                let skipped = 0;
-                for (const category of DEFAULT_PRODUCT_CATEGORIES) {
-                    if (existingNames.has(category.name.toLowerCase())) {
-                        skipped++;
-                        continue;
-                    }
-
-                    await setDoc(doc(db, "categories", category.id), {
-                        name: category.name,
-                        imageUrl: category.imageUrl,
-                        type: 'product',
-                        active: true,
-                        createdAt: serverTimestamp()
-                    });
-                    added++;
-                }
-
-                alert(`${added}টি নতুন Category যোগ হয়েছে। ${skipped}টি আগে থেকেই ছিল।`);
-                await loadCategories();
-            } catch (error) {
-                console.error("Error adding default categories: ", error);
-                alert("Category যোগ করা যায়নি। Firebase connection ও Firestore permissions পরীক্ষা করুন।");
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    button.innerHTML = '<i class="fas fa-layer-group"></i> Add 8 Free Fire Categories';
-                }
             }
         }
 
@@ -2103,7 +1954,7 @@
 
         window.showView = showView;
         window.logoutAdmin = logoutAdmin;
-        window.verifyAdminLogin = verifyAdminLogin;
+        window.verifyAdminPin = verifyAdminPin;
         window.openAddProductModal = openAddProductModal;
         window.saveProduct = saveProduct;
         window.editProduct = editProduct;
@@ -2113,7 +1964,6 @@
         window.rejectDeposit = rejectDeposit;
         window.editUserWallet = editUserWallet;
         window.openAddCategoryModal = openAddCategoryModal;
-        window.addDefaultCategories = addDefaultCategories;
         window.saveCategory = saveCategory;
         window.deleteCategory = deleteCategory;
         window.saveSpinSettings = saveSpinSettings;
