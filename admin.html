@@ -283,7 +283,7 @@
         .status-active { background: #D1FAE5; color: #059669; }
         .status-inactive { background: #FEE2E2; color: #DC2626; }
 
-        /* PIN Login Screen */
+        /* Firebase Email/Password Login Screen */
         .pin-screen {
             position: fixed;
             inset: 0;
@@ -332,7 +332,7 @@
             text-align: center;
             font-size: 1.5rem;
             font-weight: 800;
-            letter-spacing: 8px;
+            letter-spacing: 1px;
             outline: none;
             margin-bottom: 16px;
             color: var(--secondary);
@@ -409,17 +409,18 @@
 </head>
 <body>
 
-    <!-- ================= PIN LOGIN SCREEN ================= -->
+    <!-- ================= FIREBASE EMAIL/PASSWORD LOGIN SCREEN ================= -->
     <div id="pin-screen" class="pin-screen">
         <div class="pin-box">
             <img src="https://i.postimg.cc/4308Kqh7/file-0000000085f881f582c588c132aa44a0.png" alt="Logo">
-            <h2>Admin Access</h2>
-            <p>Enter your secret PIN to continue</p>
-            
-            <input type="password" id="admin-pin-input" class="pin-input" placeholder="****" maxlength="10" autocomplete="off">
-            <p id="pin-error-msg" class="pin-error">❌ Wrong PIN! Please try again.</p>
-            
-            <button class="btn-primary w-full" onclick="verifyAdminPin()">Unlock Panel</button>
+            <h2>Admin Login</h2>
+            <p>Sign in with your authorized Firebase account</p>
+
+            <input type="email" id="admin-email-input" class="pin-input" placeholder="Admin Email" autocomplete="username" style="font-size:1rem;letter-spacing:0;text-align:left;font-weight:500">
+            <input type="password" id="admin-password-input" class="pin-input" placeholder="Password" autocomplete="current-password" style="font-size:1rem;letter-spacing:0;text-align:left;font-weight:500">
+            <p id="pin-error-msg" class="pin-error" role="alert"></p>
+
+            <button id="admin-login-button" class="btn-primary w-full" onclick="verifyAdminLogin()">Login to Admin Panel</button>
         </div>
         <p class="text-xs text-white/50 mt-6">Only authorized personnel can access this panel.</p>
     </div>
@@ -938,48 +939,107 @@
         // 2. IMPORTS
         // ==========================================
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // ==========================================
         // 3. INITIALIZATION
         // ==========================================
         const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
         const db = getFirestore(app);
 
         // ==========================================
-        // 4. ADMIN PIN LOGIC
+        // 4. FIREBASE EMAIL/PASSWORD ADMIN AUTH
         // ==========================================
-        const ADMIN_PIN = "NBH"; // Fixed PIN as requested
-        
-        // Check if admin is already logged in (session storage)
-        if (sessionStorage.getItem('isAdminLoggedIn') === 'true') {
-            document.getElementById('pin-screen').style.display = 'none';
-            document.getElementById('admin-main-panel').style.display = 'block';
-            loadAllData();
+        const loginScreen = document.getElementById('pin-screen');
+        const adminPanel = document.getElementById('admin-main-panel');
+        const loginError = document.getElementById('pin-error-msg');
+        const loginButton = document.getElementById('admin-login-button');
+
+        function showAdminLoginError(message) {
+            loginError.textContent = message;
+            loginError.style.display = 'block';
         }
 
-        function verifyAdminPin() {
-            const enteredPin = document.getElementById('admin-pin-input').value;
-            const errorMsg = document.getElementById('pin-error-msg');
-            
-            if (enteredPin === ADMIN_PIN) {
-                sessionStorage.setItem('isAdminLoggedIn', 'true');
-                document.getElementById('pin-screen').style.display = 'none';
-                document.getElementById('admin-main-panel').style.display = 'block';
-                loadAllData();
-            } else {
-                errorMsg.style.display = 'block';
-                document.getElementById('admin-pin-input').value = '';
-                setTimeout(() => { errorMsg.style.display = 'none'; }, 3000);
+        function firebaseAuthErrorMessage(error) {
+            const code = error && error.code ? error.code : '';
+            if (code === 'auth/invalid-email') return 'ইমেইল ঠিকানা সঠিক নয়।';
+            if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') return 'ইমেইল অথবা পাসওয়ার্ড ভুল।';
+            if (code === 'auth/too-many-requests') return 'অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।';
+            if (code === 'auth/network-request-failed') return 'ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।';
+            if (code === 'auth/operation-not-allowed') return 'Firebase Console থেকে Email/Password sign-in চালু করুন।';
+            if (code === 'auth/unauthorized-domain') return 'এই ওয়েবসাইটের ডোমেইন Firebase Authentication-এর Authorized domains-এ যোগ করুন।';
+            if (code === 'auth/user-disabled') return 'এই Admin account Firebase থেকে Disable করা আছে।';
+            if (code === 'auth/client-timeout') return error.message;
+            return 'Firebase Error: ' + (code || 'unknown') + (error && error.message ? ' — ' + error.message : '');
+        }
+
+        async function verifyAdminLogin() {
+            const email = document.getElementById('admin-email-input').value.trim();
+            const password = document.getElementById('admin-password-input').value;
+            loginError.style.display = 'none';
+            if (!email || !password) {
+                showAdminLoginError('ইমেইল ও পাসওয়ার্ড দুটোই লিখুন।');
+                return;
+            }
+            loginButton.disabled = true;
+            loginButton.textContent = 'Signing in...';
+
+            let timeoutId;
+            try {
+                // Firebase normally responds quickly. Avoid leaving the button stuck forever
+                // if the browser/network cannot complete the Authentication request.
+                const signInPromise = signInWithEmailAndPassword(auth, email, password);
+                const timeoutPromise = new Promise((resolve, reject) => {
+                    timeoutId = setTimeout(() => {
+                        const timeoutError = new Error(
+                            'Firebase Authentication ২০ সেকেন্ডেও response দেয়নি। Internet, Render domain এবং Firebase Authorized domains পরীক্ষা করুন।'
+                        );
+                        timeoutError.code = 'auth/client-timeout';
+                        reject(timeoutError);
+                    }, 20000);
+                });
+
+                await Promise.race([signInPromise, timeoutPromise]);
+                // onAuthStateChanged handles showing the panel after Firebase confirms the session.
+            } catch (error) {
+                showAdminLoginError(firebaseAuthErrorMessage(error));
+                if (error && error.code !== 'auth/client-timeout') {
+                    document.getElementById('admin-password-input').value = '';
+                }
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+                loginButton.disabled = false;
+                loginButton.textContent = 'Login to Admin Panel';
             }
         }
 
-        function logoutAdmin() {
-            sessionStorage.removeItem('isAdminLoggedIn');
-            window.location.reload();
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                loginScreen.style.display = 'none';
+                adminPanel.style.display = 'block';
+                if (!window.__aminxAdminDataLoaded) {
+                    window.__aminxAdminDataLoaded = true;
+                    loadAllData();
+                }
+            } else {
+                window.__aminxAdminDataLoaded = false;
+                adminPanel.style.display = 'none';
+                loginScreen.style.display = 'flex';
+            }
+        });
+
+        async function logoutAdmin() {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error('Admin logout failed:', error);
+                showAdminLoginError('Logout করা যায়নি। আবার চেষ্টা করুন।');
+            }
         }
 
-        // Load all data after successful PIN entry
+        // Load all data after successful Firebase authentication
         function loadAllData() {
             loadDashboardData();
             loadProducts();
@@ -996,9 +1056,12 @@
             loadSpinSettings();
         }
 
-        // Allow Enter key to submit PIN
-        document.getElementById('admin-pin-input').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') verifyAdminPin();
+        // Allow Enter key to submit Firebase email/password login
+        document.getElementById('admin-email-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') verifyAdminLogin();
+        });
+        document.getElementById('admin-password-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') verifyAdminLogin();
         });
 
         // ==========================================
@@ -1177,7 +1240,7 @@
             }
         }
 
-        function openAddProductModal() {
+        async function openAddProductModal() {
             document.getElementById('modal-title').textContent = 'Add Product';
             document.getElementById('edit-product-id').value = '';
             document.getElementById('prod-name').value = '';
@@ -1188,25 +1251,49 @@
             document.getElementById('prod-diamond-count').value = '';
             document.getElementById('prod-requires-whatsapp').value = 'false';
             document.getElementById('prod-status').value = 'true';
-            
-            // Load categories into dropdown
-            loadCategoriesToDropdown();
-            
+
+            // Wait until Firestore categories are loaded before opening the form.
+            await loadCategoriesToDropdown();
             document.getElementById('product-modal').classList.add('active');
         }
 
         async function loadCategoriesToDropdown() {
+            const select = document.getElementById('prod-category');
+            select.disabled = true;
+            select.innerHTML = '<option value="">Loading categories...</option>';
+
             try {
                 const q = query(collection(db, "categories"));
                 const querySnapshot = await getDocs(q);
-                const select = document.getElementById('prod-category');
+                const categories = [];
+
+                querySnapshot.forEach((categoryDoc) => {
+                    const cat = categoryDoc.data();
+                    if (cat && typeof cat.name === 'string' && cat.name.trim()) {
+                        categories.push(cat.name.trim());
+                    }
+                });
+
+                // Keep all existing category records available, matching the current category manager.
+                categories.sort((a, b) => a.localeCompare(b));
                 select.innerHTML = '<option value="">Select Category</option>';
-                querySnapshot.forEach((doc) => {
-                    const cat = doc.data();
-                    select.innerHTML += `<option value="${cat.name}">${cat.name}</option>`;
+
+                if (categories.length === 0) {
+                    select.innerHTML = '<option value="">No categories found - add a category first</option>';
+                    return;
+                }
+
+                categories.forEach((name) => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    select.appendChild(option);
                 });
             } catch (error) {
                 console.error("Error loading categories: ", error);
+                select.innerHTML = '<option value="">Could not load categories - check connection/permissions</option>';
+            } finally {
+                select.disabled = false;
             }
         }
 
@@ -1954,7 +2041,7 @@
 
         window.showView = showView;
         window.logoutAdmin = logoutAdmin;
-        window.verifyAdminPin = verifyAdminPin;
+        window.verifyAdminLogin = verifyAdminLogin;
         window.openAddProductModal = openAddProductModal;
         window.saveProduct = saveProduct;
         window.editProduct = editProduct;
