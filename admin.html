@@ -1240,7 +1240,7 @@
             }
         }
 
-        function openAddProductModal() {
+        async function openAddProductModal() {
             document.getElementById('modal-title').textContent = 'Add Product';
             document.getElementById('edit-product-id').value = '';
             document.getElementById('prod-name').value = '';
@@ -1251,25 +1251,49 @@
             document.getElementById('prod-diamond-count').value = '';
             document.getElementById('prod-requires-whatsapp').value = 'false';
             document.getElementById('prod-status').value = 'true';
-            
-            // Load categories into dropdown
-            loadCategoriesToDropdown();
-            
+
+            // Wait until Firestore categories are loaded before opening the form.
+            await loadCategoriesToDropdown();
             document.getElementById('product-modal').classList.add('active');
         }
 
         async function loadCategoriesToDropdown() {
+            const select = document.getElementById('prod-category');
+            select.disabled = true;
+            select.innerHTML = '<option value="">Loading categories...</option>';
+
             try {
                 const q = query(collection(db, "categories"));
                 const querySnapshot = await getDocs(q);
-                const select = document.getElementById('prod-category');
+                const categories = [];
+
+                querySnapshot.forEach((categoryDoc) => {
+                    const cat = categoryDoc.data();
+                    if (cat && typeof cat.name === 'string' && cat.name.trim()) {
+                        categories.push(cat.name.trim());
+                    }
+                });
+
+                // Keep all existing category records available, matching the current category manager.
+                categories.sort((a, b) => a.localeCompare(b));
                 select.innerHTML = '<option value="">Select Category</option>';
-                querySnapshot.forEach((doc) => {
-                    const cat = doc.data();
-                    select.innerHTML += `<option value="${cat.name}">${cat.name}</option>`;
+
+                if (categories.length === 0) {
+                    select.innerHTML = '<option value="">No categories found - add a category first</option>';
+                    return;
+                }
+
+                categories.forEach((name) => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    select.appendChild(option);
                 });
             } catch (error) {
                 console.error("Error loading categories: ", error);
+                select.innerHTML = '<option value="">Could not load categories - check connection/permissions</option>';
+            } finally {
+                select.disabled = false;
             }
         }
 
